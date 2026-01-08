@@ -1,0 +1,44 @@
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+name: MSBuild
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.1
+
+      - name: Build
+        run: msbuild ModelicaMatioDump.sln /m /p:Configuration=Release /p:Platform=x64
+
+      - name: Locate binary and copy to artifact folder
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path $PWD -Recurse -Filter ModelicaMatioDump.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) {
+            # Fallback: try to find any exe that looks like the project output
+            $exe = Get-ChildItem -Path $PWD -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
+                   Where-Object { $_.FullName -match "bin.*Release" -or $_.Name -match "Modelica.*Dump" } |
+                   Select-Object -First 1
+          }
+          if (-not $exe) {
+            Write-Error "ModelicaMatioDump.exe not found. Build may have failed or output path differs. Listing bin folders for diagnosis:"
+            Get-ChildItem -Path $PWD -Recurse -Directory -Filter bin | ForEach-Object { Write-Host $_.FullName; Get-ChildItem -Path $_.FullName -Recurse -Depth 1 }
+            exit 1
+          }
+          New-Item -ItemType Directory -Path artifact -Force | Out-Null
+          Copy-Item -Path $exe.FullName -Destination (Join-Path $PWD "artifact\ModelicaMatioDump.exe") -Force
+          Write-Host "Copied $($exe.FullName) to artifact\ModelicaMatioDump.exe"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModelicaMatioDump
+          path: artifact/ModelicaMatioDump.exe
